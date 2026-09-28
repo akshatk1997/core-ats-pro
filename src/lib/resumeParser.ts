@@ -1,133 +1,231 @@
-import { StructuredResume, WorkExperienceItem, EducationItem, SkillGroup } from '@/types';
+import { StructuredResume, WorkExperienceItem, EducationItem, SkillGroup, ProjectItem, CertificationItem } from '@/types';
 
 export function parseRawResumeText(rawText: string): StructuredResume {
-  const lines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  const cleanText = rawText.trim();
+
+  // 1. JSON Direct Parse Check
+  if (cleanText.startsWith('{') && cleanText.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(cleanText);
+      if (parsed && typeof parsed === 'object' && (parsed.contactInfo || parsed.workExperience || parsed.skills)) {
+        return {
+          contactInfo: {
+            fullName: parsed.contactInfo?.fullName || 'Candidate Name',
+            email: parsed.contactInfo?.email || 'candidate@example.com',
+            phone: parsed.contactInfo?.phone || '',
+            location: parsed.contactInfo?.location || '',
+            linkedin: parsed.contactInfo?.linkedin || '',
+            portfolio: parsed.contactInfo?.portfolio || '',
+            github: parsed.contactInfo?.github || ''
+          },
+          summary: parsed.summary || '',
+          workExperience: Array.isArray(parsed.workExperience) ? parsed.workExperience : [],
+          education: Array.isArray(parsed.education) ? parsed.education : [],
+          skills: Array.isArray(parsed.skills) ? parsed.skills : [],
+          projects: Array.isArray(parsed.projects) ? parsed.projects : [],
+          certifications: Array.isArray(parsed.certifications) ? parsed.certifications : [],
+          achievements: Array.isArray(parsed.achievements) ? parsed.achievements : [],
+          languages: Array.isArray(parsed.languages) ? parsed.languages : [],
+          leadership: Array.isArray(parsed.leadership) ? parsed.leadership : [],
+          customHeaders: parsed.customHeaders || {},
+          customSections: Array.isArray(parsed.customSections) ? parsed.customSections : []
+        };
+      }
+    } catch (e) {
+      // Continue to natural text parsing
+    }
+  }
+
+  // 2. Line-by-Line Dynamic Parsing
+  const rawLines = cleanText.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
   
-  let fullName = 'Candidate User';
-  let email = 'candidate@example.com';
-  let phone = '(555) 019-2831';
-  let location = 'San Francisco, CA';
-  let linkedin = 'linkedin.com/in/candidate';
+  let fullName = '';
+  let email = '';
+  let phone = '';
+  let location = '';
+  let linkedin = '';
 
   // Extract contact info from top lines
-  lines.slice(0, 5).forEach(line => {
-    if (line.includes('@')) email = line.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/)?.[0] || email;
-    if (line.match(/\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/)) phone = line.match(/\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/)?.[0] || phone;
-    if (line.toLowerCase().includes('linkedin')) linkedin = line;
-  });
+  for (const line of rawLines.slice(0, 7)) {
+    if (!email && line.includes('@')) {
+      const match = line.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+      if (match) email = match[0];
+    }
+    if (!phone && line.match(/\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/)) {
+      const match = line.match(/\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/);
+      if (match) phone = match[0];
+    }
+    if (!linkedin && line.toLowerCase().includes('linkedin')) {
+      linkedin = line;
+    }
+    if (!fullName && !line.includes('@') && !line.includes('http') && !line.match(/\d{3}/) && line.length < 35) {
+      fullName = line;
+    }
+  }
 
-  // Extract sections based on standard section headers
+  if (!fullName) fullName = rawLines[0] || 'Uploaded Candidate';
+  if (!email) email = 'candidate@uploaded-resume.com';
+
+  // Section Segmentation
   const summaryLines: string[] = [];
-  const workBullets: string[] = [];
-  const skillList: string[] = [];
+  const expLines: string[] = [];
+  const eduLines: string[] = [];
+  const skillLines: string[] = [];
+  const projectLines: string[] = [];
+  const certLines: string[] = [];
 
-  let currentSection = 'summary';
+  let currentSec = 'summary';
 
-  lines.forEach(line => {
+  for (const line of rawLines) {
     const lower = line.toLowerCase();
-    if (lower.includes('experience') || lower.includes('work history') || lower.includes('employment')) {
-      currentSection = 'experience';
-      return;
-    } else if (lower.includes('education') || lower.includes('academic')) {
-      currentSection = 'education';
-      return;
-    } else if (lower.includes('skill') || lower.includes('competencies') || lower.includes('technologies')) {
-      currentSection = 'skills';
-      return;
+    if (lower.match(/^(experience|work history|employment history|professional experience|work experience)/i)) {
+      currentSec = 'experience';
+      continue;
+    } else if (lower.match(/^(education|academic background|qualifications)/i)) {
+      currentSec = 'education';
+      continue;
+    } else if (lower.match(/^(skills|technical skills|competencies|technologies)/i)) {
+      currentSec = 'skills';
+      continue;
+    } else if (lower.match(/^(projects|key initiatives|key projects)/i)) {
+      currentSec = 'projects';
+      continue;
+    } else if (lower.match(/^(certifications|licenses|credentials)/i)) {
+      currentSec = 'certifications';
+      continue;
+    } else if (lower.match(/^(summary|profile|about me|executive summary)/i)) {
+      currentSec = 'summary';
+      continue;
     }
 
-    if (currentSection === 'summary') {
-      if (!line.includes('@') && !line.includes('http')) summaryLines.push(line);
-    } else if (currentSection === 'experience') {
-      if (line.startsWith('-') || line.startsWith('•') || line.length > 20) {
-        workBullets.push(line.replace(/^[-•]\s*/, ''));
+    if (currentSec === 'summary') {
+      if (!line.includes('@') && !line.match(/^http/) && line !== fullName) {
+        summaryLines.push(line);
       }
-    } else if (currentSection === 'skills') {
-      skillList.push(...line.split(/[,|•]/).map(s => s.trim()).filter(s => s.length > 1));
+    } else if (currentSec === 'experience') {
+      expLines.push(line);
+    } else if (currentSec === 'education') {
+      eduLines.push(line);
+    } else if (currentSec === 'skills') {
+      skillLines.push(line);
+    } else if (currentSec === 'projects') {
+      projectLines.push(line);
+    } else if (currentSec === 'certifications') {
+      certLines.push(line);
     }
-  });
+  }
 
-  const summary = summaryLines.slice(0, 4).join(' ') || 'Results-driven professional with strong domain experience and a proven track record of cross-functional execution.';
+  // Build Parsed Work Experience Items from extracted lines
+  const workExperience: WorkExperienceItem[] = [];
+  let currentJob: WorkExperienceItem | null = null;
 
-  const workExperience: WorkExperienceItem[] = [
-    {
-      id: `exp_${Date.now()}_1`,
-      company: 'Apex Tech Solutions',
-      role: 'Associate Project Manager',
-      location: 'San Francisco, CA',
-      startDate: '2023-01',
+  for (const l of expLines) {
+    if (l.startsWith('-') || l.startsWith('•') || l.startsWith('*')) {
+      const bText = l.replace(/^[-•*]\s*/, '').trim();
+      if (currentJob) {
+        currentJob.bullets.push(bText);
+      } else {
+        currentJob = {
+          id: `exp_${Date.now()}_0`,
+          company: 'Target Organization',
+          role: 'Professional Role',
+          location: '',
+          startDate: '2022',
+          endDate: 'Present',
+          current: true,
+          bullets: [bText]
+        };
+        workExperience.push(currentJob);
+      }
+    } else {
+      // Line is likely a Company or Role header
+      const parts = l.split(/[-|•–]/).map(p => p.trim());
+      currentJob = {
+        id: `exp_${Date.now()}_${workExperience.length}`,
+        company: parts[0] || 'Organization',
+        role: parts[1] || parts[0] || 'Professional Role',
+        location: parts[2] || '',
+        startDate: '2022',
+        endDate: 'Present',
+        current: true,
+        bullets: []
+      };
+      workExperience.push(currentJob);
+    }
+  }
+
+  // Fallback if no experience headers found
+  if (workExperience.length === 0 && expLines.length > 0) {
+    workExperience.push({
+      id: `exp_${Date.now()}_default`,
+      company: 'Extracted Professional Experience',
+      role: 'Role',
+      location: '',
+      startDate: '2022',
       endDate: 'Present',
       current: true,
-      bullets: workBullets.length > 0 ? workBullets.slice(0, 4) : [
-        'Led cross-functional team of 12 engineers and specialists through 14 sprint cycles, delivering product features ahead of schedule.',
-        'Streamlined stakeholder reporting by implementing automated Jira dashboards, reducing status update overhead by 35%.',
-        'Managed a project budget of $450,000, ensuring resource allocation optimized project burn rate.'
-      ]
-    },
-    {
-      id: `exp_${Date.now()}_2`,
-      company: 'Nexus Innovations',
-      role: 'Project Management Intern',
-      location: 'San Jose, CA',
-      startDate: '2022-05',
-      endDate: '2022-12',
-      current: false,
-      bullets: [
-        'Supported digital marketing campaigns across paid and organic channels, contributing to improved lead engagement.',
-        'Organized daily stand-up meetings and tracked action items using Trello and Confluence for a 9-person squad.'
-      ]
-    }
-  ];
+      bullets: expLines.slice(0, 6)
+    });
+  }
 
-  const education: EducationItem[] = [
-    {
+  // Build Parsed Education Items
+  const education: EducationItem[] = [];
+  if (eduLines.length > 0) {
+    education.push({
       id: `edu_${Date.now()}`,
-      institution: 'University of California, Berkeley',
-      degree: 'Bachelor of Science',
-      fieldOfStudy: 'Business Administration & Data Science',
-      startDate: '2018-09',
-      endDate: '2022-05',
-      gpa: '3.82/4.0',
-      honors: 'Magna Cum Laude'
-    }
-  ];
+      institution: eduLines[0] || 'University',
+      degree: eduLines[1] || 'Bachelor Degree',
+      fieldOfStudy: 'General Studies',
+      startDate: '2018',
+      endDate: '2022',
+    });
+  }
 
-  const skills: SkillGroup[] = [
+  // Build Parsed Skills Groups
+  const parsedSkillsList: string[] = [];
+  for (const sLine of skillLines) {
+    parsedSkillsList.push(...sLine.split(/[,|•]/).map(s => s.trim()).filter(s => s.length > 1));
+  }
+
+  const skills: SkillGroup[] = parsedSkillsList.length > 0
+    ? [{ category: 'Extracted Technical & Core Skills', skills: parsedSkillsList }]
+    : [];
+
+  // Build Parsed Projects
+  const projects: ProjectItem[] = projectLines.length > 0 ? [
     {
-      category: 'Technical & Methodologies',
-      skills: skillList.length > 0 ? skillList.slice(0, 8) : ['Agile / Scrum', 'Jira', 'Confluence', 'Risk Management', 'Stakeholder Management', 'Power BI', 'SQL', 'Excel']
-    },
-    {
-      category: 'Leadership & Soft Skills',
-      skills: ['Cross-Functional Leadership', 'Executive Presentation', 'Conflict Resolution']
+      id: `proj_${Date.now()}`,
+      title: projectLines[0] || 'Extracted Project',
+      description: projectLines.slice(1, 3).join(' ') || '',
+      technologies: parsedSkillsList.slice(0, 4),
+      bullets: projectLines.slice(1, 4)
     }
-  ];
+  ] : [];
+
+  // Build Parsed Certifications
+  const certifications: CertificationItem[] = certLines.map((c, i) => ({
+    id: `cert_${Date.now()}_${i}`,
+    name: c,
+    issuer: 'Issuing Body',
+    dateObtained: ''
+  }));
 
   return {
-    contactInfo: { fullName, email, phone, location, linkedin },
-    summary,
+    contactInfo: {
+      fullName,
+      email,
+      phone,
+      location,
+      linkedin
+    },
+    summary: summaryLines.join(' ') || 'Professional candidate with parsed experience.',
     workExperience,
     education,
     skills,
-    projects: [
-      {
-        id: `proj_${Date.now()}`,
-        title: 'Enterprise Workflow Automation Engine',
-        description: 'Designed automated request pipeline for operations.',
-        technologies: ['Python', 'Jira API', 'React'],
-        bullets: ['Implemented automated triage logic reducing lead time by 80%.']
-      }
-    ],
-    certifications: [
-      {
-        id: `cert_${Date.now()}`,
-        name: 'Certified ScrumMaster (CSM)',
-        issuer: 'Scrum Alliance',
-        dateObtained: '2023-03'
-      }
-    ],
-    achievements: ['Awarded Top Intern Innovator at Nexus Innovations.'],
-    languages: ['English (Native)', 'Spanish (Working)'],
-    leadership: ['Vice President of Operations - Student Consulting Org']
+    projects,
+    certifications,
+    achievements: [],
+    languages: [],
+    leadership: []
   };
 }

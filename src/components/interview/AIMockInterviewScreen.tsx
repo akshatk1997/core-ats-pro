@@ -119,6 +119,7 @@ export const AIMockInterviewScreen: React.FC<AIMockInterviewScreenProps> = ({
   const [interviewStarted, setInterviewStarted] = useState(false);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [userTranscript, setUserTranscript] = useState('');
+  const [answeredTranscripts, setAnsweredTranscripts] = useState<Record<number, string>>({});
   const [interviewTime, setInterviewTime] = useState(0);
   const [copiedAnswerIndex, setCopiedAnswerIndex] = useState<number | null>(null);
 
@@ -395,12 +396,16 @@ export const AIMockInterviewScreen: React.FC<AIMockInterviewScreenProps> = ({
     setInterviewStarted(true);
     setCurrentQuestionIndex(0);
     setUserTranscript('');
+    setAnsweredTranscripts({});
     startCamera();
     speakQuestion(questions[0]);
   };
 
   const handleNextQuestion = () => {
     stopVoiceRecognition();
+    if (userTranscript.trim()) {
+      setAnsweredTranscripts(prev => ({ ...prev, [currentQuestionIndex]: userTranscript }));
+    }
     if (currentQuestionIndex < questions.length - 1) {
       const nextIdx = currentQuestionIndex + 1;
       setCurrentQuestionIndex(nextIdx);
@@ -411,6 +416,56 @@ export const AIMockInterviewScreen: React.FC<AIMockInterviewScreenProps> = ({
       stopCamera();
       setActiveTab('scorecard');
     }
+  };
+
+  // Dynamic Scorecard Calculation based on actual user response transcript & telemetry
+  const calculateDynamicScorecard = () => {
+    const allText = Object.values(answeredTranscripts).join(' ') + ' ' + userTranscript;
+    const transcriptText = allText.trim();
+    const wordCount = transcriptText ? transcriptText.split(/\s+/).length : 0;
+    
+    // STAR methodology keywords
+    const starKeywords = ['situation', 'task', 'action', 'result', 'led', 'achieved', 'managed', 'delivered', 'increased', 'reduced', 'implemented', 'scaled', 'built', 'created', 'optimized'];
+    const starMatches = starKeywords.filter(kw => transcriptText.toLowerCase().includes(kw)).length;
+    
+    // Numbers/metrics in transcript
+    const metricMatches = (transcriptText.match(/\d+(%|\$|k|M|x| years| months| users| engineers)?/gi) || []).length;
+    
+    // Skill matches from target job
+    const reqSkills = targetJob.requiredSkills || [];
+    const skillMatches = reqSkills.filter(s => transcriptText.toLowerCase().includes(s.toLowerCase())).length;
+
+    // Parameter Scores
+    const clarityScore = wordCount > 30 ? Math.min(98, 75 + Math.round(wordCount * 0.3)) : (wordCount > 5 ? 70 : 60);
+    const technicalScore = reqSkills.length > 0 ? Math.min(98, Math.round(60 + (skillMatches / reqSkills.length) * 38)) : 82;
+    const starScore = Math.min(96, Math.max(50, 65 + starMatches * 6));
+    const facialScore = facialTelemetry.eyeContactScore || 90;
+    const metricScore = Math.min(98, Math.max(50, 60 + metricMatches * 10));
+
+    const overallScore = Math.round((clarityScore * 0.25) + (technicalScore * 0.25) + (starScore * 0.20) + (facialScore * 0.15) + (metricScore * 0.15));
+
+    let feedbackSummary = '';
+    if (overallScore >= 85) {
+      feedbackSummary = `Excellent performance! High technical skill alignment (${skillMatches} key terms matched), clear response cadence (${wordCount} words recorded), and strong facial posture.`;
+    } else if (overallScore >= 70) {
+      feedbackSummary = `Solid response foundation. To reach top 5% candidate benchmark, add more quantitative metrics ($, %) and explicitly state STAR methodology results.`;
+    } else {
+      feedbackSummary = `Good initial practice attempt. Ensure your camera alignment is locked and expand your answers with specific technical tools (${reqSkills.slice(0, 3).join(', ')}).`;
+    }
+
+    return {
+      overallScore,
+      clarityScore,
+      technicalScore,
+      starScore,
+      facialScore,
+      metricScore,
+      wordCount,
+      starMatches,
+      metricMatches,
+      skillMatches,
+      feedbackSummary
+    };
   };
 
   // Import Custom Bulk Questions Handler
@@ -1078,49 +1133,55 @@ export const AIMockInterviewScreen: React.FC<AIMockInterviewScreenProps> = ({
       )}
 
       {/* TAB 3: POST-INTERVIEW PERFORMANCE SCORECARD */}
-      {activeTab === 'scorecard' && (
-        <div className="space-y-8 max-w-4xl mx-auto">
-          {/* Main Score Overview Header */}
-          <div className="p-8 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm text-center space-y-4">
-            <Badge variant="success">INTERVIEW COMPLETED</Badge>
-            <h2 className="text-3xl font-black text-slate-900 dark:text-slate-100">
-              AI Interview Readiness Score
-            </h2>
+      {activeTab === 'scorecard' && (() => {
+        const scoreData = calculateDynamicScorecard();
+        return (
+          <div className="space-y-8 max-w-4xl mx-auto">
+            {/* Main Score Overview Header */}
+            <div className="p-8 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm text-center space-y-4">
+              <Badge variant={scoreData.overallScore >= 80 ? "success" : "warning"}>INTERVIEW COMPLETED</Badge>
+              <h2 className="text-3xl font-black text-slate-900 dark:text-slate-100">
+                AI Interview Performance & Readiness Score
+              </h2>
 
-            <div className="w-28 h-28 mx-auto rounded-full border-8 border-emerald-500 flex items-center justify-center font-black text-3xl text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 shadow-xl">
-              88%
+              <div className="w-28 h-28 mx-auto rounded-full border-8 border-emerald-500 flex items-center justify-center font-black text-3xl text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 shadow-xl">
+                {scoreData.overallScore}%
+              </div>
+
+              <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+                {scoreData.feedbackSummary}
+              </p>
             </div>
 
-            <p className="text-xs text-slate-500 max-w-md mx-auto">
-              Strong executive presence and STAR method structure. Excellent quantitative metric usage for budget and velocity questions.
-            </p>
-          </div>
+            {/* Breakdown Parameters */}
+            <div className="p-6 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center justify-between">
+                <span>Performance Breakdown Metrics</span>
+                <span className="text-xs text-slate-500 font-normal">Based on {scoreData.wordCount} transcript words recorded</span>
+              </h3>
 
-          {/* Breakdown Parameters */}
-          <div className="p-6 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">Performance Breakdown</h3>
+              <div className="space-y-4">
+                <ProgressBar label={`Speech Cadence & Communication Clarity (${scoreData.wordCount} words)`} value={scoreData.clarityScore} color="success" />
+                <ProgressBar label={`Technical Skill Coverage (${scoreData.skillMatches} matched skills)`} value={scoreData.technicalScore} color="brand" />
+                <ProgressBar label={`STAR Method Structure (${scoreData.starMatches} method anchors)`} value={scoreData.starScore} color="success" />
+                <ProgressBar label={`Facial Eye Contact & Telemetry`} value={scoreData.facialScore} color="success" />
+                <ProgressBar label={`Quantifiable Impact Metrics (${scoreData.metricMatches} numbers used)`} value={scoreData.metricScore} color={scoreData.metricScore >= 75 ? "success" : "warning"} />
+              </div>
+            </div>
 
-            <div className="space-y-4">
-              <ProgressBar label="Communication Clarity & Cadence" value={92} color="success" />
-              <ProgressBar label="Technical & Tool Competency (Jira, SQL, Power BI)" value={86} color="brand" />
-              <ProgressBar label="STAR Method Answer Structure" value={90} color="success" />
-              <ProgressBar label="Facial Expression & Eye Contact (94%)" value={94} color="success" />
-              <ProgressBar label="Quantitative Impact Metrics ($450K, 35%)" value={84} color="warning" />
+            {/* Print / Download Report */}
+            <div className="flex justify-center space-x-3">
+              <button
+                onClick={() => window.print()}
+                className="px-6 py-3 rounded-xl bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 text-white dark:text-slate-900 font-extrabold text-xs transition-all shadow-md flex items-center space-x-2"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Print Detailed Performance Report</span>
+              </button>
             </div>
           </div>
-
-          {/* Print / Download Report */}
-          <div className="flex justify-center space-x-3">
-            <button
-              onClick={() => window.print()}
-              className="px-6 py-3 rounded-xl bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 text-white dark:text-slate-900 font-extrabold text-xs transition-all shadow-md flex items-center space-x-2"
-            >
-              <Printer className="w-4 h-4" />
-              <span>Print Interview Summary</span>
-            </button>
-          </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 };

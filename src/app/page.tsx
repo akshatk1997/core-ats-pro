@@ -261,6 +261,19 @@ function HomeContent() {
   // Helper: Upload new resume
   const handleUploadComplete = (newContent: StructuredResume, fileName: string) => {
     const { breakdown, issues } = calculateATSScore(newContent, activeJob);
+    
+    // Synchronize parsed candidate contact info into active user profile
+    if (newContent.contactInfo?.fullName && newContent.contactInfo.fullName !== 'Candidate Name') {
+      const updatedUser: UserProfile = {
+        ...user,
+        name: newContent.contactInfo.fullName,
+        email: newContent.contactInfo.email || user.email,
+        linkedInUrl: newContent.contactInfo.linkedin || user.linkedInUrl,
+      };
+      setUser(updatedUser);
+      saveUserProfile(updatedUser);
+    }
+
     const newVer: ResumeVersion = {
       id: `ver_${Date.now()}`,
       name: fileName.replace(/\.[^/.]+$/, ''),
